@@ -1,90 +1,64 @@
+const axios = require('axios');
 const fs = require('fs');
-const path = require('path');
 
-/**
- * Função Recursiva para buscar um arquivo em todas as subpastas
- */
-function buscarArquivo(diretorio, nomeArquivo) {
-    const arquivos = fs.readdirSync(diretorio);
+// Evita reinicializar tudo várias vezes
+let initialized = false;
 
-    for (const arquivo of arquivos) {
-        const caminhoCompleto = path.join(diretorio, arquivo);
-        const estatistica = fs.statSync(caminhoCompleto);
+module.exports = function initHome(options = {}) {
+    if (initialized) return;
+    initialized = true;
 
-        if (estatistica.isDirectory()) {
-            const resultado = buscarArquivo(caminhoCompleto, nomeArquivo);
-            if (resultado) return resultado;
-        } else if (arquivo === nomeArquivo) {
-            return caminhoCompleto;
-        }
-    }
-    return null;
-}
+    const prefix = options.prefix || "[HOME]";
 
-/**
- * SISTEMA DE TAGS HÍBRIDO (ORQUESTRADOR COM BUSCA)
- */
-function motorHibrido(conteudo) {
-    const regexTag = /<\/(\w+)>\s*([\s\S]*?)\s*<\/\1>/g;
-    let execucaoFinal = "";
-    let match;
+    // ===== LOG =====
+    global.log = (...args) => {
+        console.log(prefix, ...args);
+    };
 
-    while ((match = regexTag.exec(conteudo)) !== null) {
-        const tag = match[1].toLowerCase();
-        const codigoInterno = match[2];
+    // ===== TIME =====
+    global.time = {
+        now: new Date(),
+        timestamp: Date.now(),
+        format: (locale = "pt-BR") => new Date().toLocaleString(locale)
+    };
 
-        // O ";" no início de cada bloco impede que o JS tente invocar o resultado anterior
-        if (tag === 'javascript' || tag === 'js') {
-            execucaoFinal += `\n; // --- [JS Direto] ---\n${codigoInterno}\n;`;
-        } else {
-            const nomeTradutor = `${tag}.js`;
-            const caminhoTradutor = buscarArquivo(__dirname, nomeTradutor);
-            
-            if (caminhoTradutor) {
-                try {
-                    delete require.cache[require.resolve(caminhoTradutor)];
-                    const tradutor = require(caminhoTradutor);
-                    // Adicionando ";" antes e depois da tradução por segurança
-                    execucaoFinal += `\n; // --- [Bloco ${tag} Traduzido de: ${path.relative(__dirname, caminhoTradutor)}] ---\n${tradutor(codigoInterno)}\n;`;
-                } catch (e) {
-                    console.error(`[Erro] Falha ao carregar o tradutor "${tag}":`, e.message);
-                }
-            } else {
-                console.warn(`[Aviso] Tradutor "${nomeTradutor}" não encontrado na raiz ou subpastas.`);
+    // ===== SLEEP =====
+    global.sleep = (ms) => new Promise(res => setTimeout(res, ms));
+
+    // ===== API =====
+    global.api = {
+        translate: async (text, to = "pt") => {
+            try {
+                const res = await axios.post("https://libretranslate.de/translate", {
+                    q: text,
+                    source: "auto",
+                    target: to,
+                    format: "text"
+                });
+                return res.data.translatedText;
+            } catch (e) {
+                console.error(prefix, "Erro na tradução:", e.message);
+                return text;
             }
         }
-    }
-    return execucaoFinal;
-}
+    };
 
-// --- LÓGICA DE BUSCA DO ARQUIVO DE CÓDIGO (code.mts) ---
+    // ===== FS SIMPLIFICADO =====
+    global.fsPlus = {
+        read: (path) => fs.readFileSync(path, 'utf-8'),
+        write: (path, content) => fs.writeFileSync(path, content),
+        exists: (path) => fs.existsSync(path)
+    };
 
-const argArquivo = process.argv[2];
-const arquivoAlvo = argArquivo || 'code.mts';
-const caminhoAbsoluto = path.resolve(process.cwd(), arquivoAlvo);
+    // ===== MATH EXTRA =====
+    global.math = {
+        random: (min, max) => Math.random() * (max - min) + min,
+        clamp: (v, min, max) => Math.max(min, Math.min(max, v))
+    };
 
-if (!fs.existsSync(caminhoAbsoluto)) {
-    console.error(`ERRO: Arquivo de código "${arquivoAlvo}" não encontrado.`);
-    process.exit(1);
-}
+    // ===== ENV =====
+    global.env = process.env;
 
-try {
-    const textoBruto = fs.readFileSync(caminhoAbsoluto, 'utf-8');
-    const codigoPronto = motorHibrido(textoBruto);
-
-    if (!codigoPronto.trim()) {
-        console.log("AVISO: Nenhuma tag processada.");
-        process.exit(0);
-    }
-
-    console.log("========================================");
-    console.log(`   MOTOR POLIGLOTA - EXECUTANDO: ${arquivoAlvo}`);
-    console.log("========================================\n");
-
-    // Agora o código rodará sem tentar invocar logs como funções
-    eval(codigoPronto);
-
-    console.log("\n========================================");
-} catch (e) {
-    console.error("\n[ERRO NA EXECUÇÃO]:", e.stack);
-}
+    // ===== DEBUG =====
+    log("Ghost Home carregado.");
+};
